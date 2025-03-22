@@ -1,0 +1,573 @@
+% 2024-12-30
+% reward分析
+% clc;clear;close all;
+
+%% simulation产生数据
+load("Theta1.mat");
+load("Theta2.mat");
+load("Theta3.mat");
+load("CableTension.mat");
+kp = 30700;
+kd = 2*sqrt(kp);
+n = 100;
+step_time = CableTension(2,1)-CableTension(1,1);
+offside_time = 2*step_time;
+simulation_time = CableTension(end,1) + offside_time;
+
+pause_time(1) = 2;
+pause_time(2:181) = 0.5;
+
+tic
+cycle_num = (simulation_time - offside_time) / step_time + 1;
+env_name = 'computed_torque_rl_theta';
+set_param(env_name , 'SimulationCommand', 'stop');
+set_param(env_name , 'StopTime', num2str(simulation_time));
+set_param('computed_torque_rl_theta/pause_time', 'value', num2str(step_time));
+
+plt_target_theta = zeros(3,cycle_num);
+plt_actual_theta = zeros(3,cycle_num);
+plt_actual_theta_d = zeros(3,cycle_num);
+pause_flag = 0;
+repeat_flag = 0;
+first_flag = 1;
+pause_time_total = 0;
+pause_time_total = pause_time_total + step_time;
+
+for i = 1:181         % step num 
+    disp(['num:',num2str(i)]);   
+    if first_flag
+        set_param(env_name , 'SimulationCommand', 'start');
+        pause(pause_time(i));
+        first_flag = 0;
+    else
+        set_param(env_name , 'SimulationCommand', 'continue');
+        pause(pause_time(i));
+    end
+    while(1)
+        disp(['loop num:',num2str(i)]);
+        repeat_flag = repeat_flag + 1;
+        if repeat_flag > 3
+            pause(pause_time(i))
+        end
+        if pause_flag
+            pause_flag = 0;
+            repeat_flag = 0;
+            break;
+        end
+    end
+    State = state';
+    plt_target_theta(:,i) = State(1:3,end);
+    plt_actual_theta(:,i) = State(4:6,end);
+    plt_actual_theta_d(:,i) = State(19:end,end);
+    % 修改下一step_time
+    pause_time_total = pause_time_total + step_time;
+    set_param('computed_torque_rl_theta/pause_time', 'value', num2str(pause_time_total));
+end
+set_param(env_name , 'SimulationCommand', 'stop');
+toc
+%% 画图
+% 1、theta_target、theta_actual、err_target
+close all;
+figure;
+subplot(3, 2, [1 3 5])
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_target_theta(1,:))]);ylim([-1 0.4]);
+for i = 1:3
+    p(i) = plot(plt_target_theta(i,:),'k',LineWidth=1.5);
+    p(i+3) = plot(plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('theta(rad)');
+legend([p(1),p(4)],'thetaTarget','thetaActual','Location','southeast');
+
+colorList = {'r',':r','--r'};
+legendList = {'theta1Err','theta2Err','theta3Err'};
+ylimList = {[0 5e-3],[-4e-2 0],[0 0.2]};
+for i = 1:3
+    subplot(3,2,2*i)
+    hold on;box on;legend('box','off');%grid minor;
+    theta_err_max = max(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    theta_err_min = min(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    xlim([0 length(plt_target_theta(1,:))]);ylim(ylimList{i});
+    p(i) = plot(plt_target_theta(i,:)-plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+    xlabel('cycle(%)');ylabel('thetaErr(rad)');
+    legend(p(i),legendList{i},'Location','southeast');
+end
+maxTheta=[max(plt_target_theta(1,:)),max(plt_target_theta(2,:)),max(plt_target_theta(3,:))];
+minTheta=[min(plt_target_theta(1,:)),min(plt_target_theta(2,:)),min(plt_target_theta(3,:))];
+
+% 2、theta_d和theta_delta
+figure;
+plt_delta_theta = zeros(3,cycle_num);
+plt_delta_err_theta = zeros(3,cycle_num);
+plt_delta_err_theta_abs = zeros(3,cycle_num);
+plt_err_theta = plt_target_theta - plt_actual_theta;
+for i = 1:180
+    delta_theta = (plt_actual_theta(:,i)-plt_actual_theta(:,i+1))/0.015;
+    plt_delta_theta(:,i) = delta_theta;
+    delta_err_theta = (plt_err_theta(:,i)-plt_err_theta(:,i+1))/0.015;
+    plt_delta_err_theta(:,i) = delta_err_theta;
+    plt_delta_err_theta_abs(:,i) = abs(delta_err_theta);
+end
+% sub1、delta_theta
+subplot(1,3,1);
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_delta_theta(1,:))]);ylim([-4 3]);
+for i = 1:3
+    p(i) = plot(plt_delta_theta(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('deltaTheta(rad/s)');
+legend([p(1),p(2),p(3)],'deltaTheta_1','deltaTheta_2','deltaTheta_3','Location','southeast');
+% sub2、err_delta_theta
+subplot(1,3,2);
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_delta_err_theta(1,:))]);ylim([-4 3]);
+for i = 1:3
+    p(i) = plot(plt_delta_err_theta(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('deltaThetaErr(rad/s)');
+legend([p(1),p(2),p(3)],'deltaThetaErr_1','deltaThetaErr_2','deltaThetaErr_3','Location','southeast');
+
+subplot(1,3,3);
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_delta_err_theta_abs(1,:))]);ylim([-4 3]);
+for i = 1:3
+    p(i) = plot(plt_delta_err_theta_abs(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('deltaThetaErr-abs(rad/s)');
+legend([p(1),p(2),p(3)],'deltaThetaErr-abs_1','deltaThetaErr-abs_2','deltaThetaErr-abs_3','Location','southeast');
+%% reward：area_reward，area_d_reward累加，无影响
+close all;
+stepThetaHigh0 = [0.15,0.15,0.35];
+stepThetaHigh1 = [0.05, 0.05, 0.1];
+stepThetaHigh2 = [0.015, 0.03, 0.05];
+stepThetaHigh3 = [0.005, 0.01, 0.02];
+
+stepThetaDHigh0 = [0.27, 1, 2];
+stepThetaDHigh1 = [0.05, 0.3, 1];
+stepThetaDHigh2 = [0.02, 0.1, 0.35];
+stepThetaDHigh3 = [0.01, 0.01, 0.05];
+
+err_reward = zeros(1,cycle_num);
+err_reward_all = zeros(cycle_num,3);
+err_theta_d_reward = zeros(1,cycle_num);
+err_theta_d_reward_all = zeros(cycle_num,3);
+step_reward = zeros(1,cycle_num);
+Reward = zeros(1,cycle_num);
+area_reward = zeros(cycle_num,4);
+area_d_reward = zeros(cycle_num,4);
+
+
+for i = 1:181
+    delta_err_theta = plt_delta_err_theta(:,i)'; % [3x181]
+    err_theta = plt_err_theta(:,i)'; % [3x181]
+    % 【放大误差】放大err_theta_3的误差奖励值，在exp的指数上加上k，放大误差
+    k_in = 25;
+    k_out = 2;
+    err_reward(i) = -0.1 * (0.1*exp(err_theta(1)) + 0.5*exp(err_theta(2)) + k_out*exp(k_in*err_theta(3)));
+    err_reward_all(i,:) = -0.1*[0.1*exp(err_theta(1)), 0.5*exp(err_theta(2)), k_out*exp(k_in*err_theta(3))];
+    err_theta_d_reward(i) = -0.1 * (0.1*exp(delta_err_theta(1)) + 0.5*exp(delta_err_theta(2)) + 10*exp(delta_err_theta(3)));
+    err_theta_d_reward_all(i,:) = -0.1*[0.1*exp(delta_err_theta(1)), 0.5*exp(delta_err_theta(2)), 10*exp(delta_err_theta(3))];
+    % 【误差范围奖励（err_theta）】    
+    area_flag0 = [err_theta(1) >= stepThetaHigh0(1),err_theta(2) >= stepThetaHigh0(2),err_theta(3) >= stepThetaHigh0(3)];
+    area_flag1 = [err_theta(1) <= stepThetaHigh1(1),err_theta(2) <= stepThetaHigh1(2),err_theta(3) <= stepThetaHigh1(3)];
+    area_flag2 = [err_theta(1) <= stepThetaHigh2(1),err_theta(2) <= stepThetaHigh2(2),err_theta(3) <= stepThetaHigh2(3)];
+    area_flag3 = [err_theta(1) <= stepThetaHigh3(1),err_theta(2) <= stepThetaHigh3(2),err_theta(3) <= stepThetaHigh3(3)];
+    if sum(area_flag0)>0
+            area_reward(i,1) = -4;
+    else                                       % < area_flag0
+        if sum(area_flag1)==3                  % < area_flag1
+            area_reward(i,2) = -1;
+            if sum(area_flag2)==3              % < area_flag2
+                area_reward(i,3) = +1; 
+                if sum(area_flag3)==3          % < area_flag3
+                    area_reward(i,4) = +2; 
+                else                           % < area_flag3
+                    area_reward(i,4) = -0.5; 
+                end
+            else                               % > area_flag2
+                area_reward(i,3) = -1;
+            end
+        else                                   % > area_flag1
+            area_reward(i,2) = -2; 
+        end
+    end            
+    
+    % 【误差速度范围奖励（delta_err_theta）】
+    area_d_flag0 = [delta_err_theta(1) >= stepThetaDHigh0(1),...
+                             delta_err_theta(2) >= stepThetaDHigh0(2),delta_err_theta(3) >= stepThetaDHigh0(3)];
+    area_d_flag1 = [delta_err_theta(1) <= stepThetaDHigh1(1),...
+                             delta_err_theta(2) <= stepThetaDHigh1(2),delta_err_theta(3) <= stepThetaDHigh1(3)];
+    area_d_flag2 = [delta_err_theta(1) <= stepThetaDHigh2(1),...
+                             delta_err_theta(2) <= stepThetaDHigh2(2),delta_err_theta(3) <= stepThetaDHigh2(3)];
+    area_d_flag3 = [delta_err_theta(1) <= stepThetaDHigh3(1),...
+                             delta_err_theta(2) <= stepThetaDHigh3(2),delta_err_theta(3) <= stepThetaDHigh3(3)];
+    if sum(area_d_flag0)>0
+            area_d_reward(i,1) = -4;
+    else                                       % < area_flag0
+        if sum(area_d_flag1)==3                  % < area_flag1
+            area_d_reward(i,2) = -1;
+            if sum(area_d_flag2)==3              % < area_flag2
+                area_d_reward(i,3) = +1; 
+                if sum(area_d_flag3)==3          % < area_flag3
+                    area_d_reward(i,4) = +2; 
+                else                           % < area_flag3
+                    area_d_reward(i,4) = -0.5; 
+                end
+            else                               % > area_flag2
+                area_d_reward(i,3) = -1;
+            end
+        else                                   % > area_flag1
+            area_d_reward(i,2) = -2; 
+        end
+    end  
+    step_reward(i) = 2 * i / cycle_num;
+    Reward(i) = err_theta_d_reward(i) + err_reward(i) + step_reward(i) + sum(area_reward(i,:)) + sum(area_d_reward(i,:));
+end
+
+figure
+subplot(4,4,1)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_target_theta(1,:))]);ylim([-1 0.4]);
+for i = 1:3
+    p(i) = plot(plt_target_theta(i,:),'k',LineWidth=1.5);
+    p(i+3) = plot(plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('theta(rad)');
+legend([p(1),p(4)],'thetaTarget','thetaActual','Location','southeast');
+
+colorList = {'r',':r','--r'};
+legendList = {'theta1Err','theta2Err','theta3Err'};
+ylimList = {[0 5e-3],[-4e-2 0],[0 0.2]};
+for i = 1:3
+    subplot(4,4,i+1)
+    hold on;box on;legend('box','off');%grid minor;
+    theta_err_max = max(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    theta_err_min = min(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    xlim([0 length(plt_target_theta(1,:))]);ylim(ylimList{i});
+    p(i) = plot(plt_target_theta(i,:)-plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+    xlabel('cycle(%)');ylabel('thetaErr(rad)');
+    legend(p(i),legendList{i},'Location','southeast');
+end
+maxTheta=[max(plt_target_theta(1,:)),max(plt_target_theta(2,:)),max(plt_target_theta(3,:))];
+minTheta=[min(plt_target_theta(1,:)),min(plt_target_theta(2,:)),min(plt_target_theta(3,:))];
+
+subplot(4,4,5)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(Reward)]);ylim([-8 0]);
+plot(Reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('Reward');legend('Reward');
+
+subplot(4,4,6)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(step_reward)]);ylim([0 2]);
+plot(step_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('stepReward');legend('stepReward');
+
+subplot(4,4,7)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k','--k'};
+xlim([0 length(area_reward(:,1))]);ylim([-1 1]);
+for i = 1:4
+    p(i) = plot(area_reward(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('areaReward');
+legend([p(1),p(2),p(3),p(4)],'areaReward_1','areaReward_2','areaReward_3','areaReward_4','Location','southeast');
+
+subplot(4,4,8)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k','--k'};
+xlim([0 length(area_d_reward(:,1))]);ylim([-1 1]);
+for i = 1:4
+    p(i) = plot(area_d_reward(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('areaDReward');
+legend([p(1),p(2),p(3),p(4)],'areaDReward_1','areaDReward_2','areaDReward_3','areaDReward_4','Location','southeast');
+
+subplot(4,4,9)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(err_theta_d_reward)]);ylim([-6 0]);
+plot(err_theta_d_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('errThetaDReward');legend('errThetaDReward');
+
+subplot(4,4,10)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k'};
+xlim([0 length(err_theta_d_reward_all(:,1))]);ylim([-5 0]);
+for i = 1:3
+    p(i) = plot(err_theta_d_reward_all(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('errThetaDRewardAll');
+legend([p(1),p(2),p(3)],'errThetaDReward_1','errThetaDReward_2','errThetaDReward_3','Location','southeast');
+
+subplot(4,4,11)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(err_reward)]);ylim([-3 0]);
+plot(err_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('errReward');legend('errReward');
+
+subplot(4,4,12)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k'};
+xlim([0 length(err_reward_all(:,1))]);ylim([-3 0]);
+for i = 1:3
+    p(i) = plot(err_reward_all(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('errThetaRewardAll');
+legend([p(1),p(2),p(3)],'errThetaReward_1','errThetaReward_2','errThetaReward_3','Location','southeast');
+
+subplot(4,4,15)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(area_reward(:,1))]);ylim([-2 2]);
+plot(sum(area_reward,2),'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('areaRewardSum');legend('areaRewardSum');
+
+subplot(4,4,16)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(area_d_reward(:,1))]);ylim([-2 2]);
+plot(sum(area_d_reward,2),'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('areaDRewardSum');legend('areaDRewardSum');
+%%
+
+stepThetaHigh0 = [0.15,0.15,0.35];
+stepThetaHigh1 = [0.05, 0.05, 0.1];
+stepThetaHigh2 = [0.015, 0.03, 0.05];
+stepThetaHigh3 = [0.005, 0.01, 0.02];
+
+stepThetaDHigh0 = [0.27, 1, 2];
+stepThetaDHigh1 = [0.05, 0.3, 1];
+stepThetaDHigh2 = [0.02, 0.1, 0.35];
+stepThetaDHigh3 = [0.01, 0.01, 0.05];
+
+err_reward = zeros(1,cycle_num);
+err_reward_all = zeros(cycle_num,3);
+err_theta_d_reward = zeros(1,cycle_num);
+err_theta_d_reward_all = zeros(cycle_num,3);
+step_reward = zeros(1,cycle_num);
+Reward = zeros(1,cycle_num);
+area_reward = zeros(cycle_num,4);
+area_d_reward = zeros(cycle_num,4);
+
+
+for i = 1:181
+    delta_err_theta = plt_delta_err_theta(:,i)'; % [3x181]
+    err_theta = plt_err_theta(:,i)'; % [3x181]
+    % 【放大误差】放大err_theta_3的误差奖励值，在exp的指数上加上k，放大误差
+    k_in = 25;
+    k_out = .5;
+    err_reward(i) = -0.1 * (0.1*exp(err_theta(1)) + 0.5*exp(err_theta(2)) + 30 ./ (0.5 + 10*exp(-40*err_theta(3))));% k_out*exp(k_in*err_theta(3)));
+    err_reward_all(i,:) = -0.1*[0.1*exp(err_theta(1)), 0.5*exp(err_theta(2)), k_out*exp(k_in*err_theta(3))];
+    err_theta_d_reward(i) = -0.1 * (0.1*exp(delta_err_theta(1)) + 0.5*exp(delta_err_theta(2)) + 10*exp(delta_err_theta(3)));
+    err_theta_d_reward_all(i,:) = -0.1*[0.1*exp(delta_err_theta(1)), 0.5*exp(delta_err_theta(2)), 10*exp(delta_err_theta(3))];
+    % 【误差范围奖励（err_theta）】    
+    area_flag0 = [err_theta(1) >= stepThetaHigh0(1),err_theta(2) >= stepThetaHigh0(2),err_theta(3) >= stepThetaHigh0(3)];
+    area_flag1 = [err_theta(1) <= stepThetaHigh1(1),err_theta(2) <= stepThetaHigh1(2),err_theta(3) <= stepThetaHigh1(3)];
+    area_flag2 = [err_theta(1) <= stepThetaHigh2(1),err_theta(2) <= stepThetaHigh2(2),err_theta(3) <= stepThetaHigh2(3)];
+    area_flag3 = [err_theta(1) <= stepThetaHigh3(1),err_theta(2) <= stepThetaHigh3(2),err_theta(3) <= stepThetaHigh3(3)];
+    if sum(area_flag0)>0
+            area_reward(i,1) = -2;
+    else                                       % < area_flag0
+        if sum(area_flag1)==3                  % < area_flag1
+            area_reward(i,2) = -0.2;
+            if sum(area_flag2)==3              % < area_flag2
+                area_reward(i,3) = +0.1; 
+                if sum(area_flag3)==3          % < area_flag3
+                    area_reward(i,4) = +0.5; 
+                else                           % < area_flag3
+                    area_reward(i,4) = -0.1; 
+                end
+            else                               % > area_flag2
+                area_reward(i,3) = -0.2;
+            end
+        else                                   % > area_flag1
+            area_reward(i,2) = -0.5; 
+        end
+    end            
+    area_reward = 0.5*area_reward;
+    % 【误差速度范围奖励（delta_err_theta）】
+    area_d_flag0 = [delta_err_theta(1) >= stepThetaDHigh0(1),...
+                             delta_err_theta(2) >= stepThetaDHigh0(2),delta_err_theta(3) >= stepThetaDHigh0(3)];
+    area_d_flag1 = [delta_err_theta(1) <= stepThetaDHigh1(1),...
+                             delta_err_theta(2) <= stepThetaDHigh1(2),delta_err_theta(3) <= stepThetaDHigh1(3)];
+    area_d_flag2 = [delta_err_theta(1) <= stepThetaDHigh2(1),...
+                             delta_err_theta(2) <= stepThetaDHigh2(2),delta_err_theta(3) <= stepThetaDHigh2(3)];
+    area_d_flag3 = [delta_err_theta(1) <= stepThetaDHigh3(1),...
+                             delta_err_theta(2) <= stepThetaDHigh3(2),delta_err_theta(3) <= stepThetaDHigh3(3)];
+    if sum(area_d_flag0)>0
+            area_d_reward(i,1) = -2;
+    else                                       % < area_flag0
+        if sum(area_d_flag1)==3                  % < area_flag1
+            area_d_reward(i,2) = -0.2;
+            if sum(area_d_flag2)==3              % < area_flag2
+                area_d_reward(i,3) = +0.1; 
+                if sum(area_d_flag3)==3          % < area_flag3
+                    area_d_reward(i,4) = +0.5; 
+                else                           % < area_flag3
+                    area_d_reward(i,4) = -0.1; 
+                end
+            else                               % > area_flag2
+                area_d_reward(i,3) = -0.2;
+            end
+        else                                   % > area_flag1
+            area_d_reward(i,2) = -0.5; 
+        end
+    end  
+    step_reward(i) = 1 * i / cycle_num;
+    Reward(i) = err_theta_d_reward(i) + err_reward(i) + step_reward(i) + sum(area_reward(i,:)) + sum(area_d_reward(i,:));
+end
+
+figure
+subplot(4,4,1)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'r',':r','--r'};
+xlim([0 length(plt_target_theta(1,:))]);ylim([-1 0.4]);
+for i = 1:3
+    p(i) = plot(plt_target_theta(i,:),'k',LineWidth=1.5);
+    p(i+3) = plot(plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('theta(rad)');
+legend([p(1),p(4)],'thetaTarget','thetaActual','Location','southeast');
+
+colorList = {'r',':r','--r'};
+legendList = {'theta1Err','theta2Err','theta3Err'};
+ylimList = {[0 5e-3],[-4e-2 0],[0 0.2]};
+for i = 1:3
+    subplot(4,4,i+1)
+    hold on;box on;legend('box','off');%grid minor;
+    theta_err_max = max(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    theta_err_min = min(plt_target_theta(i,:)-plt_actual_theta(i,:));
+    xlim([0 length(plt_target_theta(1,:))]);ylim(ylimList{i});
+    p(i) = plot(plt_target_theta(i,:)-plt_actual_theta(i,:),colorList{i},LineWidth=1.5);
+    xlabel('cycle(%)');ylabel('thetaErr(rad)');
+    legend(p(i),legendList{i},'Location','southeast');
+end
+maxTheta=[max(plt_target_theta(1,:)),max(plt_target_theta(2,:)),max(plt_target_theta(3,:))];
+minTheta=[min(plt_target_theta(1,:)),min(plt_target_theta(2,:)),min(plt_target_theta(3,:))];
+
+subplot(4,4,5)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(Reward)]);ylim([-8 0]);
+plot(Reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('Reward');legend('Reward');
+
+subplot(4,4,6)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(step_reward)]);ylim([0 2]);
+plot(step_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('stepReward');legend('stepReward');
+
+subplot(4,4,7)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k','--k'};
+xlim([0 length(area_reward(:,1))]);ylim([-1 1]);
+for i = 1:4
+    p(i) = plot(area_reward(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('areaReward');
+legend([p(1),p(2),p(3),p(4)],'areaReward_1','areaReward_2','areaReward_3','areaReward_4','Location','southeast');
+
+subplot(4,4,8)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k','--k'};
+xlim([0 length(area_d_reward(:,1))]);ylim([-1 1]);
+for i = 1:4
+    p(i) = plot(area_d_reward(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('areaDReward');
+legend([p(1),p(2),p(3),p(4)],'areaDReward_1','areaDReward_2','areaDReward_3','areaDReward_4','Location','southeast');
+
+subplot(4,4,9)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(err_theta_d_reward)]);ylim([-6 0]);
+plot(err_theta_d_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('errThetaDReward');legend('errThetaDReward');
+
+subplot(4,4,10)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k'};
+xlim([0 length(err_theta_d_reward_all(:,1))]);ylim([-5 0]);
+for i = 1:3
+    p(i) = plot(err_theta_d_reward_all(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('errThetaDRewardAll');
+legend([p(1),p(2),p(3)],'errThetaDReward_1','errThetaDReward_2','errThetaDReward_3','Location','southeast');
+
+subplot(4,4,11)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(err_reward)]);ylim([-3 0]);
+plot(err_reward,'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('errReward');legend('errReward');
+
+subplot(4,4,12)
+hold on;grid minor;box on;legend('box','off');
+colorList = {'k','-.k',':k'};
+xlim([0 length(err_reward_all(:,1))]);ylim([-3 0]);
+for i = 1:3
+    p(i) = plot(err_reward_all(:,i),colorList{i},LineWidth=1.5);
+end
+xlabel('cycle(%)');ylabel('errThetaRewardAll');
+legend([p(1),p(2),p(3)],'errThetaReward_1','errThetaReward_2','errThetaReward_3','Location','southeast');
+
+subplot(4,4,15)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(area_reward(:,1))]);ylim([-2 2]);
+plot(sum(area_reward,2),'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('areaRewardSum');legend('areaRewardSum');
+
+subplot(4,4,16)
+hold on;grid minor;box on;legend('box','off');
+xlim([0 length(area_d_reward(:,1))]);ylim([-2 2]);
+plot(sum(area_d_reward,2),'k',LineWidth=1.5);
+xlabel('cycle(%)');ylabel('areaDRewardSum');legend('areaDRewardSum');
+
+%% test k_out*exp(k_in*err_theta3)
+% Sigmoid 函数（如 Logistic 函数或 tanh 函数）有平缓的增长区间，并且输出被限制在一个有限的范围内。
+%这种类型的函数在x的小变化下可以敏感地变化，而其值总是被限制在[0,1][0,1] 或 [−1,1][−1,1] 的范围内。
+i = 1;
+k_out = 0.2;
+k_in = 15;
+for err = 0:0.001:0.1
+    reward1(i) = -0.1*k_out*exp(k_in*err);
+%     reward2(i) = -1.5 ./ (0.5 + 10*exp(-40*err));
+    reward2(i) = -3 ./ (0.5 + exp(-40*err));
+    i=i+1;
+end
+figure
+hold on;
+err = 0:0.001:0.1;
+plot(err,reward1,'k',LineWidth=1.5);
+plot(err,reward2,'-.k',LineWidth=1.5);
+%% action
+close all;
+filePath = 'D:\heyulong\OneDrive\code\motion_compensation\simulation\1229\txt\action\';
+savePath = 'D:\heyulong\OneDrive\code\motion_compensation\simulationProcessing\action\';
+col = 5;
+startTxt = 600;
+endTxt = 605;
+for i = startTxt:endTxt
+    fileName = ['action_',num2str(i),'.txt'];
+    saveName = ['action_',num2str(i),'.mat'];
+    readTxtCol(fileName,filePath,savePath,saveName,col);
+    load(['action\action_',num2str(i),'.mat']);
+
+    for j = 1:180
+        eval(['action = (action_',num2str(i),'(j,2:5) - action_',num2str(i),'(j+1,2:5))/0.015']);
+        action_reward(i-600+1,j) = -3.5*sqrt(action(1)^2+action(2)^2+action(3)^2+action(4)^2);
+    end
+    eval(['Action = action_',num2str(i),'(:,2:5)']);
+    figure
+    subplot(2,1,1);
+    hold on;xlim([0 length(Action(:,1))]);
+    colorList = {'k','-.r',':g','--b'};
+    for k = 1:4
+        plot(1:181,Action(:,k)',colorList{k},LineWidth=1.5);
+    end
+    subplot(2,1,2)
+    plot(1:180,action_reward(i-600+1,:),'k',LineWidth=1.5);
+end
+
+
